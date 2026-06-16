@@ -1,0 +1,71 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "logistics": "Logistics Tracker",
+    "digital": "Digital Carbon Diet",
+    "settings": "Settings"
+  },
+  "onboarding": {
+    "title": "Welcome to EcoTrack India",
+    "subtitle": "Your localized, privacy-first carbon footprint dashboard.",
+    "energy_question": "Primary Household Energy Source",
+    "transit_question": "Primary Transit Mode",
+    "ecommerce_question": "Approximate Monthly E-commerce Orders",
+    "locale_question": "Select Your Location (State)",
+    "step1_title": "Step 1: Language & Locale",
+    "step2_title": "Step 2: Baseline Assessment",
+    "step3_title": "Step 3: Connect Services (Optional)",
+    "consent_text": "EcoTrack reads only delivery and receipt emails to calculate logistics emissions. We do not store email content on our servers.",
+    "consent_checkbox": "I consent to EcoTrack scanning delivery emails client-side.",
+    "button_next": "Next",
+    "button_prev": "Back",
+    "button_finish": "Finish",
+    "button_skip": "Skip & Open Dashboard",
+    "connect_email_label": "Link Delivery Emails (Gmail/Outlook)",
+    "connect_cloud_label": "Link Cloud Storage (Google Drive/OneDrive)"
+  },
+  "nudge": {
+    "commute_rail": "Switch to metro or rail today and save up to 40% of emissions!",
+    "logistics_return": "This e-commerce return added significant CO₂ emissions. Consider keeping or donating instead.",
+    "digital_clear": "Clear idle cloud files and promotional emails to save digital carbon footprint."
+  },
+  "modules": {
+    "logistics_title": "Omni-Logistics & Reverse Cycle Tracker",
+    "digital_title": "Digital Carbon Diet",
+    "carbon_meter": "Digital Carbon Meter",
+    "carbon_meter_status": "Status",
+    "red_zone": "In Red Zone",
+    "amber_zone": "In Amber Zone",
+    "green_zone": "In Green Zone",
+    "save_msg": "Clear files to save carbon emissions",
+    "dashboard_title": "Carbon Dashboard",
+    "total_emissions": "Total Carbon Footprint",
+    "logistics_emissions": "Logistics Emissions",
+    "digital_emissions": "Digital Emissions",
+    "commute_emissions": "Commute Emissions",
+    "add_behavior_title": "Log New Behavior",
+    "add_commute": "Add Commute Data",
+    "select_commute_type": "Select Commute Type",
+    "enter_distance": "Enter Distance (km)",
+    "btn_add": "Add Entry",
+    "btn_sync": "Sync to Cloud",
+    "sync_success": "Data synced successfully!",
+    "logistics_sync_title": "Logistics Receipts",
+    "btn_connect": "Connect",
+    "connected": "Connected",
+    "tips_title": "Eco-Tips",
+    "rideshare": "Rideshare",
+    "metro": "Metro",
+    "auto_rickshaw": "Auto-rickshaw",
+    "domestic_rail": "Domestic Rail",
+    "cycle": "Cycle",
+    "walk": "Walk",
+    "grid": "Grid Power",
+    "solar": "Solar Power",
+    "mixed": "Mixed Source"
+  },
+  "accessibility": {
+    "theme_toggle_label": "Switch to Terracotta & Monsoon theme",
+    "lang_select_label": "Select language"
+  }
+}
