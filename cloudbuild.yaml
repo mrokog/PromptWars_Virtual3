@@ -1,0 +1,49 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_AR_HOSTNAME/$PROJECT_ID/$_AR_REPO_NAME/$_IMAGE_NAME:$COMMIT_SHA'
+      - '-t'
+      - '$_AR_HOSTNAME/$PROJECT_ID/$_AR_REPO_NAME/$_IMAGE_NAME:latest'
+      - '.'
+
+  # Push the container image to Artifact Registry (Short SHA tag)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '$_AR_HOSTNAME/$PROJECT_ID/$_AR_REPO_NAME/$_IMAGE_NAME:$COMMIT_SHA'
+
+  # Push the container image to Artifact Registry (Latest tag)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '$_AR_HOSTNAME/$PROJECT_ID/$_AR_REPO_NAME/$_IMAGE_NAME:latest'
+
+  # Deploy container image to Google Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '$_SERVICE_NAME'
+      - '--image'
+      - '$_AR_HOSTNAME/$PROJECT_ID/$_AR_REPO_NAME/$_IMAGE_NAME:$COMMIT_SHA'
+      - '--region'
+      - '$_DEPLOY_REGION'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+# Default values for substitution variables.
+# These can be overridden in the Cloud Build trigger configurations.
+substitutions:
+  _AR_HOSTNAME: 'us-central1-docker.pkg.dev'
+  _AR_REPO_NAME: 'ecotrack-repo'
+  _IMAGE_NAME: 'ecotrack-india'
+  _SERVICE_NAME: 'ecotrack-india'
+  _DEPLOY_REGION: 'us-central1'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
