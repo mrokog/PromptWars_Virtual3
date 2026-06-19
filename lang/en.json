@@ -26,6 +26,13 @@
   },
   "nudge": {
     "commute_rail": "Switch to metro or rail today and save up to 40% of emissions!",
+    "commute_rail_from_rideshare": "Switch to metro or rail today and save up to 80% of emissions compared to your rideshare baseline!",
+    "commute_rail_from_auto_rickshaw": "Switch to metro or rail today and save up to 65% of emissions compared to your auto baseline!",
+    "commute_rail_from_metro": "Keep riding the metro! It's one of the cleanest modes of transport in India.",
+    "commute_rail_from_domestic_rail": "Keep riding the train! Your domestic rail commute is extremely carbon-efficient.",
+    "commute_rail_from_cycle": "Fantastic job cycling! Keep it up to maintain zero commute emissions.",
+    "commute_rail_from_walk": "Wonderful job walking! Keep walking to maintain zero commute emissions.",
+    "action_btn_text": "Take Action",
     "logistics_return": "This e-commerce return added significant CO₂ emissions. Consider keeping or donating instead.",
     "digital_clear": "Clear idle cloud files and promotional emails to save digital carbon footprint."
   },

@@ -1,10 +1,15 @@
 (function(global) {
   'use strict';
 
+  const Constants = typeof require !== 'undefined' ? require('./constants.js') : (global.EcoTrackConstants || {});
+  const Utils = typeof require !== 'undefined' ? require('./utils.js') : (global.EcoTrackUtils || {});
+
   let currentStep = 1;
 
   /**
    * Shows the current step and hides others in the wizard.
+   *
+   * @returns {void}
    */
   function updateWizardUI() {
     jQuery('.onboarding-step').hide();
@@ -38,6 +43,7 @@
   /**
    * Validates the input elements in the active step.
    * Displays errors using role="alert" inline fields.
+   *
    * @param {number} step The step number to validate.
    * @returns {boolean} True if inputs are valid, false otherwise.
    */
@@ -84,7 +90,25 @@
   }
 
   /**
-   * Collects and saves onboarding data to localStorage and IndexedDB baseline record.
+   * Helper to fetch the distance seed based on transit mode.
+   *
+   * @param {string} mode - Transit mode key.
+   * @returns {number} Distance seed in km.
+   */
+  function getDistanceSeed(mode) {
+    const seeds = Constants.BASELINE_SEEDS || {
+      rideshare: 15,
+      metro: 20,
+      auto_rickshaw: 10,
+      domestic_rail: 50
+    };
+    return seeds[mode] || 0;
+  }
+
+  /**
+   * Saves onboarding data to localStorage and IndexedDB baseline record.
+   *
+   * @returns {void}
    */
   function saveOnboardingData() {
     const data = {
@@ -102,20 +126,16 @@
     
     // Save a baseline emission seed in IndexedDB
     if (global.EcoTrackDB) {
-      let baselineRaw = 0;
-      let baselineType = 'commute';
-      let baselineSubType = data.transitMode;
-
-      if (data.transitMode === 'rideshare') baselineRaw = 15; // 15km baseline seed
-      else if (data.transitMode === 'metro') baselineRaw = 20;
-      else if (data.transitMode === 'auto_rickshaw') baselineRaw = 10;
-      else if (data.transitMode === 'domestic_rail') baselineRaw = 50;
+      const baselineRaw = getDistanceSeed(data.transitMode);
+      const baselineType = 'commute';
+      const baselineSubType = data.transitMode;
 
       if (global.EcoTrackWorker && baselineRaw > 0) {
         global.EcoTrackWorker.calculate(baselineType, baselineSubType, baselineRaw)
           .then(function(emissions) {
-            global.EcoTrackDB.addBehaviorEntry({
+            global.EcoTrackDB.write({
               type: baselineType,
+              subType: baselineSubType,
               rawValue: baselineRaw,
               emissionsGrams: emissions,
               processed: true,
@@ -130,13 +150,15 @@
     // Call server API profile sync if logged in
     const token = localStorage.getItem('ecotrack_token');
     if (token) {
-      jQuery.ajax({
+      Utils.safeAjax({
         url: '/api/user/profile',
         method: 'PUT',
         contentType: 'application/json',
         headers: { 'Authorization': 'Bearer ' + token },
         data: JSON.stringify({ profile: data })
-      }).fail(function() {
+      }, function() {
+        // success - profile synced
+      }, function() {
         console.warn('Could not sync profile settings with backend.');
       });
     }
@@ -149,6 +171,8 @@
 
   /**
    * Initializes event hooks for wizard elements.
+   *
+   * @returns {void}
    */
   function initOnboarding() {
     // Check if onboarding completed

@@ -52,6 +52,10 @@ describe('nudge.js Eco-Nudge System', () => {
       getAllEntries: jest.fn().mockResolvedValue([])
     };
 
+    global.EcoTrackWorker = {
+      detectPatterns: jest.fn().mockResolvedValue([])
+    };
+
     document.body.innerHTML = `
       <div id="nudge-container"></div>
     `;
@@ -71,6 +75,9 @@ describe('nudge.js Eco-Nudge System', () => {
         { type: 'commute', rawValue: 5, emissionsGrams: 900 },   // 5 * 180 = 900
         { type: 'commute', rawValue: 8, emissionsGrams: 1440 }   // 8 * 180 = 1440
       ])
+    };
+    global.EcoTrackWorker = {
+      detectPatterns: jest.fn().mockResolvedValue(['consecutive_rideshare'])
     };
 
     Nudge.checkBehavioralNudges();

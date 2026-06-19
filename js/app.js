@@ -1,8 +1,13 @@
 (function(global) {
   'use strict';
 
+  const Constants = typeof require !== 'undefined' ? require('./constants.js') : (global.EcoTrackConstants || {});
+  const Utils = typeof require !== 'undefined' ? require('./utils.js') : (global.EcoTrackUtils || {});
+
   /**
    * Route views based on current URL hash.
+   *
+   * @returns {void}
    */
   function navigateToView() {
     const hash = window.location.hash || '#dashboard';
@@ -22,7 +27,79 @@
   }
 
   /**
+   * Calculates carbon savings and logging streak from behavioral records.
+   *
+   * @param {Array<Object>} entries List of behavioral entries.
+   * @returns {Object} Streak and saved grams.
+   */
+  function calculateStreakAndSavings(entries) {
+    if (!entries || entries.length === 0) {
+      return { streak: 0, savedGrams: 0 };
+    }
+
+    let savedGrams = 0;
+    entries.forEach(function(e) {
+      if (e.type === 'commute') {
+        if (e.subType === 'metro') {
+          savedGrams += e.rawValue * (180 - 35);
+        } else if (e.subType === 'cycle' || e.subType === 'walk') {
+          savedGrams += e.rawValue * 180;
+        } else if (e.subType === 'auto_rickshaw') {
+          savedGrams += e.rawValue * (180 - 100);
+        } else if (e.subType === 'domestic_rail') {
+          savedGrams += e.rawValue * (180 - 15);
+        }
+      } else if (e.type === 'cloud' && e.emissionsGrams < 0) {
+        savedGrams += Math.abs(e.emissionsGrams);
+      }
+    });
+
+    const dates = [];
+    entries.forEach(function(e) {
+      const dStr = new Date(e.timestamp).toDateString();
+      if (dates.indexOf(dStr) === -1) {
+        dates.push(dStr);
+      }
+    });
+
+    const datesSorted = dates.map(function(d) {
+      return new Date(d);
+    }).sort(function(a, b) {
+      return b - a;
+    });
+
+    let streak = 0;
+    if (datesSorted.length > 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const expectedDate = datesSorted[0];
+      const diffMs = today - expectedDate;
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (diffDays <= 1) {
+        streak = 1;
+        for (let i = 1; i < datesSorted.length; i++) {
+          const current = datesSorted[i];
+          const prev = datesSorted[i - 1];
+          const diff = prev - current;
+          const diffDaysBetween = Math.round(diff / (1000 * 60 * 60 * 24));
+          if (diffDaysBetween === 1) {
+            streak++;
+          } else if (diffDaysBetween > 1) {
+            break;
+          }
+        }
+      }
+    }
+
+    return { streak, savedGrams };
+  }
+
+  /**
    * Aggregates emissions data from IndexedDB and updates the dashboard values.
+   *
+   * @returns {void}
    */
   function refreshDashboardMetrics() {
     if (!global.EcoTrackDB) return;
@@ -40,6 +117,45 @@
         jQuery('#metric-digital').text(digitalKg + ' kg');
         jQuery('#metric-total').text(totalKg + ' kg');
 
+        // Dynamic relatable comparison subtitle
+        let $comparisonText = jQuery('#total-emissions-comparison');
+        if ($comparisonText.length === 0) {
+          $comparisonText = jQuery('<p id="total-emissions-comparison" class="small text-muted mt-2" style="font-size: 0.85rem; font-weight: 500;"></p>');
+          jQuery('#metric-total').after($comparisonText);
+        }
+        if (Utils.toRelatableComparison) {
+          $comparisonText.text('≈ ' + Utils.toRelatableComparison(aggregates.total));
+        }
+
+        // Fetch all entries for streak, savings, and edge insights
+        global.EcoTrackDB.getAllEntries().then(function(entries) {
+          // Calculate streak and savings
+          const stats = calculateStreakAndSavings(entries);
+          jQuery('#impact-saved').text((stats.savedGrams / 1000).toFixed(2) + ' kg');
+          jQuery('#impact-streak').text(stats.streak + '-day streak');
+
+          // Render Edge Worker Insights
+          if (global.EcoTrackWorker && global.EcoTrackWorker.detectPatterns) {
+            global.EcoTrackWorker.detectPatterns(entries).then(function(patterns) {
+              const $list = jQuery('#edge-insights-list');
+              $list.empty();
+              if (!patterns || patterns.length === 0) {
+                $list.append('<li class="list-group-item text-muted py-2 bg-transparent border-0">No pattern findings detected yet. Keep logging behaviors to process edge insights.</li>');
+              } else {
+                patterns.forEach(function(p) {
+                  if (p === 'consecutive_rideshare') {
+                    $list.append('<li class="list-group-item py-2 bg-transparent border-0 text-danger fw-bold">⚠️ High Commute Footprint: Consecutive rideshares detected. Tip: Switch to metro to save up to 80% emissions.</li>');
+                  } else if (p === 'high_cloud_usage') {
+                    $list.append('<li class="list-group-item py-2 bg-transparent border-0 text-warning fw-bold">⚠️ High Digital Footprint: Large cloud storage detected. Tip: Clear unneeded backups/emails to save digital carbon.</li>');
+                  } else {
+                    $list.append(`<li class="list-group-item py-2 bg-transparent border-0">⚠️ Habit: ${p} detected.</li>`);
+                  }
+                });
+              }
+            });
+          }
+        });
+
         // Check if we should trigger any behavioral nudges
         if (global.EcoTrackNudge) {
           global.EcoTrackNudge.checkBehavioralNudges();
@@ -52,22 +168,32 @@
 
   /**
    * Adds commute behavior manually via form input.
+   *
+   * @param {Event} event - The form submit event.
+   * @returns {void}
    */
   function handleAddCommute(event) {
     event.preventDefault();
     const subType = jQuery('#commute-type').val();
     const distanceKm = Number(jQuery('#commute-distance').val());
+    const $feedback = jQuery('#commute-feedback');
+
+    $feedback.hide().removeClass('alert-success alert-danger').text('');
 
     if (!subType || isNaN(distanceKm) || distanceKm <= 0) {
-      alert('Please select a valid transit type and enter a distance greater than 0.');
+      $feedback
+        .addClass('alert-danger')
+        .text('Please select a valid transit type and enter a distance greater than 0.')
+        .show();
       return;
     }
 
     if (global.EcoTrackWorker && global.EcoTrackDB) {
       global.EcoTrackWorker.calculate('commute', subType, distanceKm)
         .then(function(emissions) {
-          return global.EcoTrackDB.addBehaviorEntry({
+          return global.EcoTrackDB.write({
             type: 'commute',
+            subType: subType,
             rawValue: distanceKm,
             emissionsGrams: emissions,
             processed: false,
@@ -78,25 +204,40 @@
           refreshDashboardMetrics();
           // Reset form fields
           jQuery('#commute-distance').val('');
+          $feedback
+            .addClass('alert-success')
+            .removeClass('alert-danger')
+            .text('Commute logged successfully!')
+            .show()
+            .delay(3000)
+            .fadeOut();
         })
         .catch(function(err) {
           console.error('[App] Failed to add commute behavior:', err);
+          $feedback
+            .addClass('alert-danger')
+            .text('Failed to save behavior to database.')
+            .show();
         });
     }
   }
 
   /**
    * Syncs anonymized aggregated emissions data to the Node.js backend.
+   *
+   * @returns {void}
    */
   function handleSyncEmissions() {
     if (!global.EcoTrackDB) return;
 
+    const $feedback = jQuery('#sync-feedback');
+    $feedback.hide().removeClass('alert-success alert-danger alert-info').text('');
     jQuery('#btn-sync-data').prop('disabled', true).text('Syncing...');
 
     global.EcoTrackDB.getUnprocessedEntries()
       .then(function(unprocessed) {
         if (unprocessed.length === 0) {
-          alert('All data is already synchronized!');
+          $feedback.addClass('alert-info').text('All data is already synchronized!').show();
           jQuery('#btn-sync-data').prop('disabled', false).text('Sync to Cloud');
           return;
         }
@@ -117,7 +258,8 @@
 
         // POST sync payload to the backend
         const token = localStorage.getItem('ecotrack_token');
-        jQuery.ajax({
+        
+        Utils.safeAjax({
           url: '/api/sync/emissions',
           method: 'POST',
           contentType: 'application/json',
@@ -126,22 +268,22 @@
             emissions: aggregates,
             timestamp: Date.now()
           })
-        }).done(function(response) {
+        }, function(response) {
           if (response.success) {
             // Mark sync entries as processed locally
             const ids = unprocessed.map(e => e.id);
             global.EcoTrackDB.markEntriesAsProcessed(ids)
               .then(function() {
                 jQuery('#btn-sync-data').prop('disabled', false).text('Sync to Cloud');
-                alert('Aggregated emissions synchronized successfully!');
+                $feedback.addClass('alert-success').text('Aggregated emissions synchronized successfully!').show();
                 refreshDashboardMetrics();
               });
           } else {
-            alert('Emissions sync failed.');
+            $feedback.addClass('alert-danger').text('Emissions sync failed. Please try again.').show();
             jQuery('#btn-sync-data').prop('disabled', false).text('Sync to Cloud');
           }
-        }).fail(function() {
-          alert('Failed to connect to backend server for sync.');
+        }, function() {
+          $feedback.addClass('alert-danger').text('Failed to connect to backend server for sync.').show();
           jQuery('#btn-sync-data').prop('disabled', false).text('Sync to Cloud');
         });
       });
@@ -149,6 +291,8 @@
 
   /**
    * Initializes the application lifecycle.
+   *
+   * @returns {void}
    */
   function initApp() {
     // Open DB
@@ -221,33 +365,38 @@
 
     // Demo login endpoints mock
     jQuery('#btn-login-demo').off('click').on('click', function() {
-      jQuery.ajax({
+      Utils.safeAjax({
         url: '/api/auth/login',
         method: 'POST',
         contentType: 'application/json',
         data: JSON.stringify({ email: 'demo@ecotrack.in', password: 'secure_password' })
-      }).done(function(res) {
+      }, function(res) {
         if (res.success && res.data.token) {
           localStorage.setItem('ecotrack_token', res.data.token);
           jQuery('#btn-login-demo').hide();
           jQuery('#btn-logout-demo').show();
           jQuery('#auth-status-text').text('Logged in. Token: ' + res.data.token.substring(0, 15) + '...');
         }
+      }, function() {
+        console.error('Demo login API request failed');
       });
     });
 
     jQuery('#btn-logout-demo').off('click').on('click', function() {
       const token = localStorage.getItem('ecotrack_token');
-      jQuery.ajax({
+      Utils.safeAjax({
         url: '/api/auth/logout',
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token }
-      }).always(function() {
-        localStorage.removeItem('ecotrack_token');
-        jQuery('#btn-login-demo').show();
-        jQuery('#btn-logout-demo').hide();
-        jQuery('#auth-status-text').text('Not logged in.');
+      }, function() {
+        // Success logout
+      }, function() {
+        // Error or always cleanup
       });
+      localStorage.removeItem('ecotrack_token');
+      jQuery('#btn-login-demo').show();
+      jQuery('#btn-logout-demo').hide();
+      jQuery('#auth-status-text').text('Not logged in.');
     });
 
     // Maintain current auth status on load
@@ -269,7 +418,8 @@
     refreshDashboardMetrics,
     navigateToView,
     handleAddCommute,
-    handleSyncEmissions
+    handleSyncEmissions,
+    calculateStreakAndSavings
   };
 
   if (typeof module !== 'undefined' && module.exports) {

@@ -46,23 +46,31 @@ app.use('/api/', limiter);
 app.use(express.json());
 
 /**
- * Middleware: Verify JWT Authentication Token
+ * Middleware: Verify JWT Authentication Token.
+ *
+ * @param {express.Request} req The Express request object.
+ * @param {express.Response} res The Express response object.
+ * @param {express.NextFunction} next The next middleware callback function.
+ * @returns {void}
  */
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
-    return res.status(401).json({ success: false, error: 'Unauthorized: Missing token.' });
+    res.status(401).json({ success: false, error: 'Unauthorized: Missing token.' });
+    return;
   }
 
   if (revokedTokens.has(token)) {
-    return res.status(403).json({ success: false, error: 'Forbidden: Token is revoked.' });
+    res.status(403).json({ success: false, error: 'Forbidden: Token is revoked.' });
+    return;
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      return res.status(403).json({ success: false, error: 'Forbidden: Invalid or expired token.' });
+      res.status(403).json({ success: false, error: 'Forbidden: Invalid or expired token.' });
+      return;
     }
     req.user = user;
     req.token = token;
@@ -72,7 +80,16 @@ function authenticateToken(req, res, next) {
 
 // 4. API ROUTES
 
-// POST /api/auth/login -> JWT token issue
+/**
+ * POST /api/auth/login
+ * Validates request format, seeds in-memory mock data, and issues a JWT token.
+ *
+ * @name login
+ * @path {POST} /api/auth/login
+ * @body {string} email Valid email address.
+ * @body {string} password Minimum 6 characters.
+ * @returns {void}
+ */
 app.post(
   '/api/auth/login',
   [
@@ -82,7 +99,8 @@ app.post(
   (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Invalid email or password format.' });
+      res.status(400).json({ success: false, error: 'Invalid email or password format.' });
+      return;
     }
 
     const { email } = req.body;
@@ -108,19 +126,44 @@ app.post(
   }
 );
 
-// POST /api/auth/logout -> Token revocation
+/**
+ * POST /api/auth/logout
+ * Revokes the current active token by adding it to the blacklist.
+ *
+ * @name logout
+ * @path {POST} /api/auth/logout
+ * @header {string} authorization Authorization header with Bearer token.
+ * @returns {void}
+ */
 app.post('/api/auth/logout', authenticateToken, (req, res) => {
   revokedTokens.add(req.token);
   res.json({ success: true, data: { message: 'Logged out successfully.' } });
 });
 
-// GET /api/user/profile -> Fetch user settings
+/**
+ * GET /api/user/profile
+ * Retrieves settings profile config for the authenticated user.
+ *
+ * @name getProfile
+ * @path {GET} /api/user/profile
+ * @header {string} authorization Authorization header.
+ * @returns {void}
+ */
 app.get('/api/user/profile', authenticateToken, (req, res) => {
   const profile = userProfiles[req.user.email] || {};
   res.json({ success: true, data: { profile } });
 });
 
-// PUT /api/user/profile -> Update settings
+/**
+ * PUT /api/user/profile
+ * Updates settings profile configuration for the authenticated user.
+ *
+ * @name updateProfile
+ * @path {PUT} /api/user/profile
+ * @header {string} authorization Authorization header.
+ * @body {Object} profile Profile payload object.
+ * @returns {void}
+ */
 app.put(
   '/api/user/profile',
   authenticateToken,
@@ -130,21 +173,28 @@ app.put(
   (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Invalid profile data payload.' });
+      res.status(400).json({ success: false, error: 'Invalid profile data payload.' });
+      return;
     }
 
     const { profile } = req.body;
-    userProfiles[req.user.email] = {
-      ...userProfiles[req.user.email],
-      ...profile
-    };
+    userProfiles[req.user.email] = Object.assign({}, userProfiles[req.user.email], profile);
 
     res.json({ success: true, data: { profile: userProfiles[req.user.email] } });
   }
 );
 
-// POST /api/sync/emissions -> Accept anonymized aggregate emissions data only
-// Privacy first: No raw locations or item names synced
+/**
+ * POST /api/sync/emissions
+ * Accepts aggregated, anonymized emissions data and logs it in-memory.
+ *
+ * @name syncEmissions
+ * @path {POST} /api/sync/emissions
+ * @header {string} authorization Authorization header.
+ * @body {Object} emissions Anonymized aggregated emissions data.
+ * @body {number} timestamp Timestamp of the sync.
+ * @returns {void}
+ */
 app.post(
   '/api/sync/emissions',
   authenticateToken,
@@ -155,7 +205,8 @@ app.post(
   (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'Invalid emissions payload structure.' });
+      res.status(400).json({ success: false, error: 'Invalid emissions payload structure.' });
+      return;
     }
 
     const { emissions, timestamp } = req.body;
@@ -175,7 +226,15 @@ app.post(
   }
 );
 
-// GET /api/sync/emissions -> Return historical totals for cross-device display
+/**
+ * GET /api/sync/emissions
+ * Returns historical aggregated emission totals.
+ *
+ * @name getSyncedEmissions
+ * @path {GET} /api/sync/emissions
+ * @header {string} authorization Authorization header.
+ * @returns {void}
+ */
 app.get('/api/sync/emissions', authenticateToken, (req, res) => {
   const email = req.user.email;
   const history = emissionsDb[email] || [];
@@ -194,7 +253,15 @@ app.get('/api/sync/emissions', authenticateToken, (req, res) => {
   res.json({ success: true, data: { totals, history } });
 });
 
-// POST /api/oauth/email -> Handle email OAuth token exchange (server-side only)
+/**
+ * POST /api/oauth/email
+ * Simulates client receipt email sync authorization and token exchange.
+ *
+ * @name emailOauth
+ * @path {POST} /api/oauth/email
+ * @body {string} consent Explicit user consent validation string.
+ * @returns {void}
+ */
 app.post(
   '/api/oauth/email',
   [
@@ -203,7 +270,8 @@ app.post(
   (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, error: 'User consent is required.' });
+      res.status(400).json({ success: false, error: 'User consent is required.' });
+      return;
     }
 
     // Simulate OAuth access token exchange on backend side

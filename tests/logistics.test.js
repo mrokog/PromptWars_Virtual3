@@ -6,9 +6,9 @@ const Logistics = require('../js/logistics.js');
 
 describe('logistics.js Omni-Logistics Tracker', () => {
   beforeEach(() => {
-    // Mock database fresh per test
     global.EcoTrackDB = {
-      addBehaviorEntriesBatch: jest.fn().mockResolvedValue([1, 2, 3])
+      addBehaviorEntriesBatch: jest.fn().mockResolvedValue([1, 2, 3]),
+      writeBatch: jest.fn().mockResolvedValue([1, 2, 3])
     };
 
     // Mock background calculations fresh per test

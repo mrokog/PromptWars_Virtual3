@@ -25,6 +25,7 @@ const EMISSION_FACTORS = {
 
 /**
  * Calculates emissions based on payload details.
+ *
  * @param {Object} payload The details of the behavior.
  * @returns {number} The calculated emissions in grams of CO2.
  */
@@ -47,7 +48,58 @@ function calculateEmissions(payload) {
   return rawValue * factor;
 }
 
-// Set up worker event listener
+/**
+ * Analyzes logs to detect behavioral pattern indicators.
+ *
+ * @param {Array<Object>} entries List of behavioral entries.
+ * @returns {Array<string>} List of detected patterns.
+ */
+function detectPatterns(entries) {
+  const patterns = [];
+  if (!Array.isArray(entries)) return patterns;
+
+  // Commutes sorted by timestamp ascending
+  const commutes = entries
+    .filter(function(e) { return e.type === 'commute'; })
+    .sort(function(a, b) { return a.timestamp - b.timestamp; });
+
+  // Check 3+ consecutive rideshares
+  let consecutiveRideshareCount = 0;
+  let maxConsecutiveRideshare = 0;
+  commutes.forEach(function(c) {
+    const isRideshare = c.subType === 'rideshare' || (c.rawValue > 0 && Math.abs((c.emissionsGrams / c.rawValue) - 180) < 0.1);
+    if (isRideshare) {
+      consecutiveRideshareCount++;
+      if (consecutiveRideshareCount > maxConsecutiveRideshare) {
+        maxConsecutiveRideshare = consecutiveRideshareCount;
+      }
+    } else {
+      consecutiveRideshareCount = 0;
+    }
+  });
+
+  if (maxConsecutiveRideshare >= 3) {
+    patterns.push('consecutive_rideshare');
+  }
+
+  // Check high cloud usage (total cloud rawValue > 2.0)
+  const totalCloudGB = entries
+    .filter(function(e) { return e.type === 'cloud'; })
+    .reduce(function(sum, e) { return sum + Number(e.rawValue || 0); }, 0);
+
+  if (totalCloudGB > 2.0) {
+    patterns.push('high_cloud_usage');
+  }
+
+  return patterns;
+}
+
+/**
+ * Worker event listener message handler.
+ *
+ * @param {MessageEvent} e The postMessage event containing action and payload.
+ * @returns {void}
+ */
 self.onmessage = function(e) {
   const { action, payload } = e.data;
   
@@ -56,6 +108,13 @@ self.onmessage = function(e) {
     self.postMessage({
       action: 'result',
       emissionsGrams: emissionsGrams,
+      payload: payload
+    });
+  } else if (action === 'detectPatterns') {
+    const patterns = detectPatterns(payload.entries);
+    self.postMessage({
+      action: 'patternResult',
+      patterns: patterns,
       payload: payload
     });
   }

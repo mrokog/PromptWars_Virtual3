@@ -1,6 +1,9 @@
 (function(global) {
   'use strict';
 
+  const Constants = typeof require !== 'undefined' ? require('./constants.js') : (global.EcoTrackConstants || {});
+  const Utils = typeof require !== 'undefined' ? require('./utils.js') : (global.EcoTrackUtils || {});
+
   // Mock receipt data representing parsed email headers
   const MOCK_RECEIPTS = [
     {
@@ -8,9 +11,9 @@
       merchant: 'Flipkart',
       subject: 'Your Flipkart order FKT-9831 has been delivered',
       weightKg: 2,
-      transitMode: 'air_freight', // 600 gCO2/kg
+      transitMode: 'air_freight',
       isReturn: true,
-      returnSurchargeGrams: 380, // Surcharge for reverse logistics
+      returnSurchargeGrams: Constants.RETURN_LOGISTICS_SURCHARGE || 380,
       date: 'June 14, 2026'
     },
     {
@@ -18,7 +21,7 @@
       merchant: 'Amazon India',
       subject: 'Order confirmation: AMZ-4322',
       weightKg: 5,
-      transitMode: 'road_freight', // 120 gCO2/kg
+      transitMode: 'road_freight',
       isReturn: false,
       returnSurchargeGrams: 0,
       date: 'June 15, 2026'
@@ -28,7 +31,7 @@
       merchant: 'Myntra',
       subject: 'Shipment delivered for order MYN-0987',
       weightKg: 3,
-      transitMode: 'rail_freight', // 25 gCO2/kg
+      transitMode: 'rail_freight',
       isReturn: false,
       returnSurchargeGrams: 0,
       date: 'June 16, 2026'
@@ -38,6 +41,8 @@
   /**
    * Triggers the logistics email parsing simulation.
    * Performs client-side OAuth validation and requires explicit consent.
+   *
+   * @returns {void}
    */
   function handleConnectEmail() {
     const $consentCheckbox = jQuery('#email-consent');
@@ -56,12 +61,12 @@
     // Simulate Server OAuth authorization and JWT token exchange
     jQuery('#btn-connect-email').prop('disabled', true).text('Connecting via OAuth...');
 
-    jQuery.ajax({
+    Utils.safeAjax({
       url: '/api/oauth/email',
       method: 'POST',
       contentType: 'application/json',
       data: JSON.stringify({ consent: true })
-    }).done(function(response) {
+    }, function(response) {
       if (response.success) {
         localStorage.setItem('ecotrack_email_connected', 'true');
         jQuery('#btn-connect-email').removeClass('btn-primary').addClass('btn-success').text('Connected');
@@ -70,72 +75,144 @@
       } else {
         resetConnectionButton('OAuth connection failed.');
       }
-    }).fail(function() {
+    }, function() {
       resetConnectionButton('Could not connect to server.');
     });
   }
 
+  /**
+   * Resets the connection button UI state with a error message alert.
+   *
+   * @param {string} errMsg The error message to present to the user.
+   * @returns {void}
+   */
   function resetConnectionButton(errMsg) {
     jQuery('#logistics-error').text(errMsg).show().attr('role', 'alert');
     jQuery('#btn-connect-email').prop('disabled', false).text('Connect Email');
   }
 
   /**
-   * Processes receipts using Web Worker to calculate emissions,
-   * writes them to IndexedDB, and updates the UI.
-   * @returns {Promise<Array<Object>|void>}
+   * Asynchronously calculates emissions for every receipt.
+   *
+   * @param {Array<Object>} receipts List of raw receipt objects.
+   * @returns {Promise<Object>} Object containing processedReceipts and dbEntries.
    */
-  function processAndSaveReceipts() {
-    if (!global.EcoTrackWorker || !global.EcoTrackDB) return Promise.resolve();
+  function calculateEmissionsForReceipts(receipts) {
+    if (!global.EcoTrackWorker) {
+      return Promise.resolve({ processedReceipts: [], dbEntries: [] });
+    }
 
     const dbEntries = [];
-    const promises = MOCK_RECEIPTS.map(function(receipt) {
+    const promises = receipts.map(function(receipt) {
       return global.EcoTrackWorker.calculate('purchase', receipt.transitMode, receipt.weightKg)
         .then(function(baseEmissions) {
           const totalEmissions = baseEmissions + receipt.returnSurchargeGrams;
           
-          // Prepare DB record (PII excluded - no merchant names, raw order numbers)
           dbEntries.push({
             type: 'purchase',
-            rawValue: receipt.weightKg, // kg
+            subType: receipt.transitMode,
+            rawValue: receipt.weightKg,
             emissionsGrams: totalEmissions,
             processed: true,
             timestamp: Date.now()
           });
 
-          return {
-            ...receipt,
+          return Object.assign({}, receipt, {
             baseEmissions,
             totalEmissions
-          };
+          });
         });
     });
 
     return Promise.all(promises).then(function(processedReceipts) {
-      // Save all in a batch transaction
-      return global.EcoTrackDB.addBehaviorEntriesBatch(dbEntries)
-        .then(function() {
-          renderReceiptCards(processedReceipts);
-          // Refresh main dashboard stats
-          jQuery(document).trigger('ecotrack:data-updated');
-
-          // Trigger a logistics return nudge if any returned items exist
-          const hasReturn = processedReceipts.some(r => r.isReturn);
-          if (hasReturn && global.EcoTrackNudge) {
-            // Queue return nudge
-            global.EcoTrackNudge.triggerNudge('nudge.logistics_return', 'This return added 380g CO₂');
-          }
-          return processedReceipts;
-        })
-        .catch(function(err) {
-          console.error('[Logistics DB] Failed to save parsed receipts:', err);
-        });
+      return { processedReceipts, dbEntries };
     });
   }
 
   /**
+   * Saves a list of processed entries to IndexedDB store.
+   *
+   * @param {Array<Object>} dbEntries Sanitized behavior entries.
+   * @returns {Promise<Array<number>>} Resolves to list of database keys.
+   */
+  function saveReceiptsToStore(dbEntries) {
+    if (!global.EcoTrackDB) return Promise.resolve([]);
+    return global.EcoTrackDB.writeBatch(dbEntries);
+  }
+
+  /**
+   * Processes receipts using Web Worker to calculate emissions,
+   * writes them to IndexedDB, and updates the UI.
+   *
+   * @returns {Promise<Array<Object>|void>}
+   */
+  function processAndSaveReceipts() {
+    return calculateEmissionsForReceipts(MOCK_RECEIPTS)
+      .then(function({ processedReceipts, dbEntries }) {
+        return saveReceiptsToStore(dbEntries)
+          .then(function() {
+            renderReceiptCards(processedReceipts);
+            jQuery(document).trigger('ecotrack:data-updated');
+
+            const hasReturn = processedReceipts.some(r => r.isReturn);
+            if (hasReturn && global.EcoTrackNudge) {
+              const surcharge = Constants.RETURN_LOGISTICS_SURCHARGE || 380;
+              global.EcoTrackNudge.triggerNudge('nudge.logistics_return', `This return added ${surcharge}g CO₂`);
+            }
+            return processedReceipts;
+          })
+          .catch(function(err) {
+            console.error('[Logistics DB] Failed to save parsed receipts:', err);
+            resetConnectionButton('Failed to save parsed receipts.');
+          });
+      });
+  }
+
+  /**
+   * Generates return logistics alert HTML block.
+   *
+   * @param {Object} receipt The processed receipt with total emissions details.
+   * @returns {string} The HTML string representing the return information block.
+   */
+  function generateReturnHtml(receipt) {
+    if (!receipt.isReturn) return '';
+    return `
+      <div class="logistics-card__return">
+        <span class="logistics-card__return-label">🔄 Return detected</span>
+        <span class="logistics-card__return-surcharge">Reverse logistics CO₂: +${receipt.returnSurchargeGrams}g</span>
+        <p class="logistics-card__tip">💡 Tip: Keep or donate instead → Save ${receipt.returnSurchargeGrams}g CO₂</p>
+      </div>
+    `;
+  }
+
+  /**
+   * Generates receipt card outer container HTML block.
+   *
+   * @param {Object} receipt The processed receipt.
+   * @param {string} returnHtml The HTML string of the return info block.
+   * @param {Object} modeLabels Translation mode labels.
+   * @returns {string} The card HTML structure.
+   */
+  function generateCardHtml(receipt, returnHtml, modeLabels) {
+    const formattedEmissions = Utils.formatEmissions ? Utils.formatEmissions(receipt.totalEmissions) : `${receipt.totalEmissions.toLocaleString()}g CO₂`;
+    return `
+      <div class="card logistics-card mb-3" id="receipt-card-${receipt.id}">
+        <div class="card-body">
+          <h5 class="card-title logistics-card__merchant">📦 Order #${receipt.id} — ${receipt.merchant}</h5>
+          <p class="card-text mb-1"><strong>Transit mode:</strong> ${modeLabels[receipt.transitMode] || receipt.transitMode}</p>
+          <p class="card-text mb-1"><strong>Weight:</strong> ${receipt.weightKg.toFixed(1)} kg</p>
+          <p class="card-text mb-3"><strong>Estimated CO₂:</strong> ${formattedEmissions}</p>
+          ${returnHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
    * Renders parsed e-commerce shipment details in the dashboard.
+   *
    * @param {Array<Object>} receipts The processed receipts.
+   * @returns {void}
    */
   function renderReceiptCards(receipts) {
     const $container = jQuery('#logistics-receipts-container');
@@ -150,35 +227,16 @@
     };
 
     receipts.forEach(function(receipt) {
-      let returnHtml = '';
-      if (receipt.isReturn) {
-        returnHtml = `
-          <div class="logistics-card__return">
-            <span class="logistics-card__return-label">🔄 Return detected</span>
-            <span class="logistics-card__return-surcharge">Reverse logistics CO₂: +${receipt.returnSurchargeGrams}g</span>
-            <p class="logistics-card__tip">💡 Tip: Keep or donate instead → Save ${receipt.returnSurchargeGrams}g CO₂</p>
-          </div>
-        `;
-      }
-
-      const cardHtml = `
-        <div class="card logistics-card mb-3" id="receipt-card-${receipt.id}">
-          <div class="card-body">
-            <h5 class="card-title logistics-card__merchant">📦 Order #${receipt.id} — ${receipt.merchant}</h5>
-            <p class="card-text mb-1"><strong>Transit mode:</strong> ${modeLabels[receipt.transitMode]}</p>
-            <p class="card-text mb-1"><strong>Weight:</strong> ${receipt.weightKg.toFixed(1)} kg</p>
-            <p class="card-text mb-3"><strong>Estimated CO₂:</strong> ${receipt.totalEmissions.toLocaleString()}g</p>
-            ${returnHtml}
-          </div>
-        </div>
-      `;
-
+      const returnHtml = generateReturnHtml(receipt);
+      const cardHtml = generateCardHtml(receipt, returnHtml, modeLabels);
       $container.append(cardHtml);
     });
   }
 
   /**
    * Initializes the logistics UI states on page load.
+   *
+   * @returns {void}
    */
   function initLogistics() {
     const isConnected = localStorage.getItem('ecotrack_email_connected') === 'true';

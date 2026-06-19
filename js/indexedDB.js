@@ -14,18 +14,18 @@
   function openDB() {
     return new Promise(function(resolve, reject) {
       if (dbInstance) {
-        return resolve(dbInstance);
+        resolve(dbInstance);
+        return;
       }
-
-      // Check if indexedDB is supported (in some test contexts we might mock it)
       const idb = global.indexedDB || (global.window && global.window.indexedDB);
       if (!idb) {
-        return reject(new Error('IndexedDB is not supported in this environment.'));
+        reject(new Error('IndexedDB is not supported in this environment.'));
+        return;
       }
 
       const request = idb.open(DB_NAME, DB_VERSION);
 
-      request.onerror = function(event) {
+      request.onerror = function() {
         reject(new Error('Failed to open database: ' + request.error));
       };
 
@@ -60,11 +60,11 @@
           resolve(keys);
         };
 
-        transaction.onabort = function(event) {
+        transaction.onabort = function() {
           reject(new Error('Transaction aborted. Changes rolled back. Error: ' + transaction.error));
         };
 
-        transaction.onerror = function(event) {
+        transaction.onerror = function() {
           reject(new Error('Transaction failed: ' + transaction.error));
         };
 
@@ -81,6 +81,7 @@
           // Data sanitization - strict PII exclusion
           const sanitizedEntry = {
             type: entry.type,               // 'commute' | 'purchase' | 'email' | 'cloud'
+            subType: entry.subType || '',   // e.g. 'rideshare', 'metro', 'air_freight'
             timestamp: entry.timestamp || Date.now(),
             rawValue: rawVal, // km, grams, GB
             emissionsGrams: emissions,
@@ -227,7 +228,20 @@
     });
   }
 
-  const IndexedDBController = {
+  /**
+   * Retrieves behavioral entries of a specific type.
+   * @param {string} type - Entry category type ('commute' | 'purchase' | 'email' | 'cloud').
+   * @returns {Promise<Array<Object>>} List of entries of this type.
+   */
+  function getAggregateByType(type) {
+    return getAllEntries().then(function(entries) {
+      return entries.filter(function(entry) {
+        return entry.type === type;
+      });
+    });
+  }
+
+  const BehavioralStore = {
     openDB,
     addBehaviorEntry,
     addBehaviorEntriesBatch,
@@ -235,12 +249,17 @@
     getUnprocessedEntries,
     markEntriesAsProcessed,
     getAggregatedEmissions,
-    clearDB
+    clearDB,
+    // Unified interface aliases
+    write: addBehaviorEntry,
+    writeBatch: addBehaviorEntriesBatch,
+    getAggregateByType,
+    clear: clearDB
   };
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = IndexedDBController;
+    module.exports = BehavioralStore;
   } else {
-    global.EcoTrackDB = IndexedDBController;
+    global.EcoTrackDB = BehavioralStore;
   }
 })(typeof window !== 'undefined' ? window : this);

@@ -260,6 +260,41 @@
             <p class="fs-3 fw-bold text-primary" id="metric-digital">0.00 kg</p>
           </div>
         </div>
+      <!-- Impact Summary and Edge Insights Widgets -->
+      <div class="row mb-4">
+        <!-- Impact Summary Widget -->
+        <article class="col-md-6 mb-3">
+          <div class="card p-4 shadow-sm h-100">
+            <h2 class="h5 mb-3" style="color: var(--color-primary); display: flex; align-items: center; gap: 8px;">
+              <span>🏆</span> Impact Summary
+            </h2>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <div>
+                <p class="text-muted mb-1" style="font-size: 0.85rem;">Total Carbon Saved</p>
+                <p class="fs-4 fw-bold mb-0 text-success" id="impact-saved">0.00 kg</p>
+              </div>
+              <div class="text-end">
+                <p class="text-muted mb-1" style="font-size: 0.85rem;">Consistency Streak</p>
+                <span class="badge bg-success py-2 px-3" style="font-size: 0.9rem;" id="impact-streak">0-day streak</span>
+              </div>
+            </div>
+            <p class="small text-muted mb-0">Every smart transit choice and digital clean-up builds your eco-friendly habits.</p>
+          </div>
+        </article>
+
+        <!-- Edge Insights Widget -->
+        <article class="col-md-6 mb-3">
+          <div class="card p-4 shadow-sm h-100">
+            <h2 class="h5 mb-3" style="color: var(--color-primary); display: flex; align-items: center; gap: 8px;">
+              <span>⚡</span> Edge Insights
+            </h2>
+            <div id="edge-insights-container">
+              <ul class="list-group list-group-flush small" id="edge-insights-list">
+                <li class="list-group-item text-muted py-2 bg-transparent border-0">No pattern findings detected yet. Keep logging behaviors to process edge insights.</li>
+              </ul>
+            </div>
+          </div>
+        </article>
       </div>
 
       <div class="row">
@@ -284,6 +319,7 @@
                 <input type="number" id="commute-distance" class="form-control" placeholder="e.g. 15" required min="1">
               </div>
               <button type="submit" class="btn btn-primary w-100" data-i18n="modules.btn_add">Add Entry</button>
+              <div id="commute-feedback" class="mt-2 text-center alert alert-danger" style="display: none;" role="alert"></div>
             </form>
           </div>
         </article>
@@ -296,6 +332,7 @@
               EcoTrack India stores your raw logs locally on this device. You can sync anonymized, aggregated totals to back up your metrics across devices without sharing private details.
             </p>
             <button class="btn btn-outline-primary w-100 mt-3 py-2" id="btn-sync-data" data-i18n="modules.btn_sync">Sync to Cloud</button>
+            <div id="sync-feedback" class="mt-2 alert alert-info" style="display: none;" role="alert"></div>
           </div>
         </article>
       </div>
