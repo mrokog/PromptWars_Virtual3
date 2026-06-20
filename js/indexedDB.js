@@ -1,4 +1,7 @@
-(function(global) {
+/**
+ * Database Adapter for EcoTrack India behavioral logs.
+ */
+const EcoTrackDB = (function () {
   'use strict';
 
   const DB_NAME = 'EcoTrackDB';
@@ -8,11 +11,23 @@
   let dbInstance = null;
 
   /**
+   * Upgradeneeded event handler helper.
+   * @param {IDBVersionChangeEvent} event Upgradeneeded event.
+   * @private
+   */
+  function _handleUpgradeNeeded(event) {
+    const db = event.target.result;
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+    }
+  }
+
+  /**
    * Opens the IndexedDB database, setting up the store if it doesn't exist.
    * @returns {Promise<IDBDatabase>}
    */
   function openDB() {
-    return new Promise(function(resolve, reject) {
+    return new Promise(function (resolve, reject) {
       if (dbInstance) {
         resolve(dbInstance);
         return;
@@ -24,23 +39,37 @@
       }
 
       const request = idb.open(DB_NAME, DB_VERSION);
-
-      request.onerror = function() {
-        reject(new Error('Failed to open database: ' + request.error));
-      };
-
-      request.onsuccess = function(event) {
-        dbInstance = event.target.result;
+      request.onerror = () => reject(new Error('Failed to open database: ' + request.error));
+      request.onsuccess = (e) => {
+        dbInstance = e.target.result;
         resolve(dbInstance);
       };
-
-      request.onupgradeneeded = function(event) {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-        }
-      };
+      request.onupgradeneeded = _handleUpgradeNeeded;
     });
+  }
+
+  /**
+   * Sanitizes and validates a single behavioral entry.
+   * @param {Object} entry Raw input entry.
+   * @returns {Object|null} Sanitized entry or null if validation fails.
+   * @private
+   */
+  function _sanitizeAndValidateEntry(entry) {
+    const rawVal = Number(entry.rawValue);
+    const emissions = Number(entry.emissionsGrams || 0);
+
+    if (!entry.type || isNaN(rawVal) || isNaN(emissions)) {
+      return null;
+    }
+
+    return {
+      type: entry.type,
+      subType: entry.subType || '',
+      timestamp: entry.timestamp || Date.now(),
+      rawValue: rawVal,
+      emissionsGrams: emissions,
+      processed: Boolean(entry.processed || false),
+    };
   }
 
   /**
@@ -50,48 +79,25 @@
    * @returns {Promise<Array<number>>} Resolves to list of written entry keys.
    */
   function addBehaviorEntriesBatch(entries) {
-    return openDB().then(function(db) {
-      return new Promise(function(resolve, reject) {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
         const transaction = db.transaction([STORE_NAME], 'readwrite');
         const store = transaction.objectStore(STORE_NAME);
         const keys = [];
-
-        transaction.oncomplete = function() {
-          resolve(keys);
-        };
-
-        transaction.onabort = function() {
-          reject(new Error('Transaction aborted. Changes rolled back. Error: ' + transaction.error));
-        };
-
-        transaction.onerror = function() {
-          reject(new Error('Transaction failed: ' + transaction.error));
-        };
-
         let validationError = false;
-        entries.forEach(function(entry) {
-          const rawVal = Number(entry.rawValue);
-          const emissions = Number(entry.emissionsGrams || 0);
 
-          if (!entry.type || isNaN(rawVal) || isNaN(emissions)) {
+        transaction.oncomplete = () => resolve(keys);
+        transaction.onabort = () => reject(new Error('Transaction aborted: ' + transaction.error));
+        transaction.onerror = () => reject(new Error('Transaction failed: ' + transaction.error));
+
+        entries.forEach(function (entry) {
+          const sanitized = _sanitizeAndValidateEntry(entry);
+          if (!sanitized) {
             validationError = true;
             return;
           }
-
-          // Data sanitization - strict PII exclusion
-          const sanitizedEntry = {
-            type: entry.type,               // 'commute' | 'purchase' | 'email' | 'cloud'
-            subType: entry.subType || '',   // e.g. 'rideshare', 'metro', 'air_freight'
-            timestamp: entry.timestamp || Date.now(),
-            rawValue: rawVal, // km, grams, GB
-            emissionsGrams: emissions,
-            processed: Boolean(entry.processed || false)
-          };
-
-          const request = store.add(sanitizedEntry);
-          request.onsuccess = function(e) {
-            keys.push(e.target.result);
-          };
+          const request = store.add(sanitized);
+          request.onsuccess = (e) => keys.push(e.target.result);
         });
 
         if (validationError) {
@@ -107,7 +113,7 @@
    * @returns {Promise<number>} Resolves to key of the written entry.
    */
   function addBehaviorEntry(entry) {
-    return addBehaviorEntriesBatch([entry]).then(function(keys) {
+    return addBehaviorEntriesBatch([entry]).then(function (keys) {
       return keys[0];
     });
   }
@@ -117,19 +123,14 @@
    * @returns {Promise<Array<Object>>}
    */
   function getAllEntries() {
-    return openDB().then(function(db) {
-      return new Promise(function(resolve, reject) {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
         const transaction = db.transaction([STORE_NAME], 'readonly');
         const store = transaction.objectStore(STORE_NAME);
         const request = store.getAll();
 
-        request.onsuccess = function() {
-          resolve(request.result || []);
-        };
-
-        request.onerror = function() {
-          reject(new Error('Failed to retrieve entries: ' + request.error));
-        };
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(new Error('Failed to retrieve entries: ' + request.error));
       });
     });
   }
@@ -139,11 +140,26 @@
    * @returns {Promise<Array<Object>>}
    */
   function getUnprocessedEntries() {
-    return getAllEntries().then(function(entries) {
-      return entries.filter(function(entry) {
-        return !entry.processed;
-      });
+    return getAllEntries().then(function (entries) {
+      return entries.filter((entry) => !entry.processed);
     });
+  }
+
+  /**
+   * Helper to put processed status in object store.
+   * @param {IDBObjectStore} store Database store.
+   * @param {number} id Object key ID.
+   * @private
+   */
+  function _updateEntryStatus(store, id) {
+    const getReq = store.get(id);
+    getReq.onsuccess = function (e) {
+      const data = e.target.result;
+      if (data) {
+        data.processed = true;
+        store.put(data);
+      }
+    };
   }
 
   /**
@@ -152,31 +168,20 @@
    * @returns {Promise<void>}
    */
   function markEntriesAsProcessed(ids) {
-    if (!ids || ids.length === 0) return Promise.resolve();
+    if (!ids || ids.length === 0) {
+      return Promise.resolve();
+    }
 
-    return openDB().then(function(db) {
-      return new Promise(function(resolve, reject) {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
         const transaction = db.transaction([STORE_NAME], 'readwrite');
         const store = transaction.objectStore(STORE_NAME);
 
-        transaction.oncomplete = function() {
-          resolve();
-        };
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () =>
+          reject(new Error('Failed to update processed status: ' + transaction.error));
 
-        transaction.onerror = function() {
-          reject(new Error('Failed to mark entries as processed: ' + transaction.error));
-        };
-
-        ids.forEach(function(id) {
-          const getReq = store.get(id);
-          getReq.onsuccess = function(e) {
-            const data = e.target.result;
-            if (data) {
-              data.processed = true;
-              store.put(data);
-            }
-          };
-        });
+        ids.forEach((id) => _updateEntryStatus(store, id));
       });
     });
   }
@@ -186,16 +191,10 @@
    * @returns {Promise<Object>}
    */
   function getAggregatedEmissions() {
-    return getAllEntries().then(function(entries) {
-      const aggregates = {
-        commute: 0,
-        purchase: 0,
-        email: 0,
-        cloud: 0,
-        total: 0
-      };
+    return getAllEntries().then(function (entries) {
+      const aggregates = { commute: 0, purchase: 0, email: 0, cloud: 0, total: 0 };
 
-      entries.forEach(function(entry) {
+      entries.forEach(function (entry) {
         if (aggregates[entry.type] !== undefined) {
           aggregates[entry.type] += entry.emissionsGrams;
         }
@@ -211,19 +210,14 @@
    * @returns {Promise<void>}
    */
   function clearDB() {
-    return openDB().then(function(db) {
-      return new Promise(function(resolve, reject) {
+    return openDB().then(function (db) {
+      return new Promise(function (resolve, reject) {
         const transaction = db.transaction([STORE_NAME], 'readwrite');
         const store = transaction.objectStore(STORE_NAME);
         const request = store.clear();
 
-        request.onsuccess = function() {
-          resolve();
-        };
-
-        request.onerror = function() {
-          reject(new Error('Failed to clear database: ' + request.error));
-        };
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(new Error('Failed to clear database: ' + request.error));
       });
     });
   }
@@ -234,14 +228,12 @@
    * @returns {Promise<Array<Object>>} List of entries of this type.
    */
   function getAggregateByType(type) {
-    return getAllEntries().then(function(entries) {
-      return entries.filter(function(entry) {
-        return entry.type === type;
-      });
+    return getAllEntries().then(function (entries) {
+      return entries.filter((entry) => entry.type === type);
     });
   }
 
-  const BehavioralStore = {
+  return {
     openDB,
     addBehaviorEntry,
     addBehaviorEntriesBatch,
@@ -254,12 +246,14 @@
     write: addBehaviorEntry,
     writeBatch: addBehaviorEntriesBatch,
     getAggregateByType,
-    clear: clearDB
+    clear: clearDB,
   };
+})();
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = BehavioralStore;
-  } else {
-    global.EcoTrackDB = BehavioralStore;
-  }
-})(typeof window !== 'undefined' ? window : this);
+// Browser exposes the module on window; Node/Jest exposes it via module.exports.
+// This block is identical across every module file — do not vary its shape.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = EcoTrackDB;
+} else {
+  window.EcoTrackDB = EcoTrackDB;
+}

@@ -1,10 +1,28 @@
-(function(global) {
+/**
+ * User Onboarding Wizard Controller for EcoTrack India.
+ */
+const EcoTrackOnboarding = (function () {
   'use strict';
 
-  const Constants = typeof require !== 'undefined' ? require('./constants.js') : (global.EcoTrackConstants || {});
-  const Utils = typeof require !== 'undefined' ? require('./utils.js') : (global.EcoTrackUtils || {});
+  const Constants =
+    typeof require !== 'undefined' ? require('./constants.js') : global.EcoTrackConstants || {};
+  const Utils = typeof require !== 'undefined' ? require('./utils.js') : global.EcoTrackUtils || {};
+  const Preferences =
+    typeof require !== 'undefined' ? require('./preferences.js') : global.EcoTrackPreferences || {};
 
   let currentStep = 1;
+
+  /**
+   * Helper to toggle wizard buttons based on current step.
+   * @param {number} step Current wizard step.
+   * @private
+   */
+  function _toggleWizardButtons(step) {
+    jQuery('#btn-prev').toggle(step > 1);
+    jQuery('#btn-next').toggle(step < 3);
+    jQuery('#btn-finish').toggle(step === 3);
+    jQuery('#btn-skip').toggle(step < 3);
+  }
 
   /**
    * Shows the current step and hides others in the wizard.
@@ -15,29 +33,55 @@
     jQuery('.onboarding-step').hide();
     jQuery(`#onboarding-step-${currentStep}`).show();
 
-    // Update step headings/progress indicators
     jQuery('.step-indicator').removeClass('active');
     for (let i = 1; i <= currentStep; i++) {
       jQuery(`#indicator-step-${i}`).addClass('active');
     }
 
-    // Toggle button visibilities
-    if (currentStep === 1) {
-      jQuery('#btn-prev').hide();
-      jQuery('#btn-next').show();
-      jQuery('#btn-finish').hide();
-      jQuery('#btn-skip').show();
-    } else if (currentStep === 2) {
-      jQuery('#btn-prev').show();
-      jQuery('#btn-next').show();
-      jQuery('#btn-finish').hide();
-      jQuery('#btn-skip').show();
-    } else if (currentStep === 3) {
-      jQuery('#btn-prev').show();
-      jQuery('#btn-next').hide();
-      jQuery('#btn-finish').show();
-      jQuery('#btn-skip').hide();
+    _toggleWizardButtons(currentStep);
+  }
+
+  /**
+   * Validates step 1 inputs.
+   * @returns {boolean} True if valid.
+   * @private
+   */
+  function _validateStep1() {
+    const state = jQuery('#onboarding-state').val();
+    if (!state) {
+      jQuery('#error-step-1')
+        .text('Please select your state / location.')
+        .show()
+        .attr('role', 'alert');
+      return false;
     }
+    return true;
+  }
+
+  /**
+   * Validates step 2 inputs.
+   * @returns {boolean} True if valid.
+   * @private
+   */
+  function _validateStep2() {
+    const transit = jQuery('[name="transit-mode"]:checked').val();
+    const energy = jQuery('[name="energy-source"]:checked').val();
+    const orders = jQuery('#onboarding-orders').val();
+
+    let error = '';
+    if (!transit) {
+      error = 'Please select your primary transit mode.';
+    } else if (!energy) {
+      error = 'Please select your primary household energy source.';
+    } else if (!orders) {
+      error = 'Please select your average monthly e-commerce orders.';
+    }
+
+    if (error) {
+      jQuery('#error-step-2').text(error).show().attr('role', 'alert');
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -48,45 +92,14 @@
    * @returns {boolean} True if inputs are valid, false otherwise.
    */
   function validateStep(step) {
-    let isValid = true;
     jQuery(`#onboarding-step-${step} .error-msg`).hide().text('');
-
     if (step === 1) {
-      const state = jQuery('#onboarding-state').val();
-      if (!state) {
-        jQuery('#error-step-1')
-          .text('Please select your state / location.')
-          .show()
-          .attr('role', 'alert');
-        isValid = false;
-      }
-    } else if (step === 2) {
-      const transit = jQuery('[name="transit-mode"]:checked').val();
-      const energy = jQuery('[name="energy-source"]:checked').val();
-      const orders = jQuery('#onboarding-orders').val();
-
-      if (!transit) {
-        jQuery('#error-step-2')
-          .text('Please select your primary transit mode.')
-          .show()
-          .attr('role', 'alert');
-        isValid = false;
-      } else if (!energy) {
-        jQuery('#error-step-2')
-          .text('Please select your primary household energy source.')
-          .show()
-          .attr('role', 'alert');
-        isValid = false;
-      } else if (!orders) {
-        jQuery('#error-step-2')
-          .text('Please select your average monthly e-commerce orders.')
-          .show()
-          .attr('role', 'alert');
-        isValid = false;
-      }
+      return _validateStep1();
     }
-
-    return isValid;
+    if (step === 2) {
+      return _validateStep2();
+    }
+    return true;
   }
 
   /**
@@ -100,9 +113,63 @@
       rideshare: 15,
       metro: 20,
       auto_rickshaw: 10,
-      domestic_rail: 50
+      domestic_rail: 50,
     };
     return seeds[mode] || 0;
+  }
+
+  /**
+   * Seeds the baseline emissions in the IndexedDB database.
+   * @param {string} transitMode Selected transit mode.
+   * @private
+   */
+  function _seedBaselineEmissions(transitMode) {
+    if (!global.EcoTrackDB) {
+      return;
+    }
+    const baselineRaw = getDistanceSeed(transitMode);
+    if (global.EcoTrackWorker && baselineRaw > 0) {
+      global.EcoTrackWorker.calculate('commute', transitMode, baselineRaw)
+        .then(function (emissions) {
+          global.EcoTrackDB.write({
+            type: 'commute',
+            subType: transitMode,
+            rawValue: baselineRaw,
+            emissionsGrams: emissions,
+            processed: true,
+            timestamp: Date.now(),
+          });
+        })
+        .catch(function (err) {
+          console.error('[Onboarding DB] Failed to seed baseline:', err);
+        });
+    }
+  }
+
+  /**
+   * Syncs user onboarding settings profile with backend.
+   * @param {Object} data User settings data object.
+   * @private
+   */
+  function _syncProfileWithBackend(data) {
+    const token = Preferences.getToken();
+    if (token) {
+      Utils.safeAjax(
+        {
+          url: '/api/user/profile',
+          method: 'PUT',
+          contentType: 'application/json',
+          headers: { Authorization: 'Bearer ' + token },
+          data: JSON.stringify({ profile: data }),
+        },
+        function () {
+          // profile synced successfully
+        },
+        function () {
+          console.warn('Could not sync profile settings with backend.');
+        }
+      );
+    }
   }
 
   /**
@@ -118,55 +185,51 @@
       energySource: jQuery('[name="energy-source"]:checked').val(),
       monthlyOrders: jQuery('#onboarding-orders').val(),
       emailConnected: jQuery('#email-consent').is(':checked'),
-      cloudConnected: jQuery('#cloud-consent').is(':checked')
+      cloudConnected: jQuery('#cloud-consent').is(':checked'),
     };
 
-    localStorage.setItem('ecotrack_onboarded', 'true');
-    localStorage.setItem('ecotrack_user_settings', JSON.stringify(data));
-    
-    // Save a baseline emission seed in IndexedDB
-    if (global.EcoTrackDB) {
-      const baselineRaw = getDistanceSeed(data.transitMode);
-      const baselineType = 'commute';
-      const baselineSubType = data.transitMode;
+    Preferences.setOnboarded(true);
+    Preferences.setUserSettings(data);
 
-      if (global.EcoTrackWorker && baselineRaw > 0) {
-        global.EcoTrackWorker.calculate(baselineType, baselineSubType, baselineRaw)
-          .then(function(emissions) {
-            global.EcoTrackDB.write({
-              type: baselineType,
-              subType: baselineSubType,
-              rawValue: baselineRaw,
-              emissionsGrams: emissions,
-              processed: true,
-              timestamp: Date.now()
-            }).catch(function(err) {
-              console.error('[Onboarding DB] Failed to seed baseline:', err);
-            });
-          });
-      }
-    }
+    _seedBaselineEmissions(data.transitMode);
+    _syncProfileWithBackend(data);
 
-    // Call server API profile sync if logged in
-    const token = localStorage.getItem('ecotrack_token');
-    if (token) {
-      Utils.safeAjax({
-        url: '/api/user/profile',
-        method: 'PUT',
-        contentType: 'application/json',
-        headers: { 'Authorization': 'Bearer ' + token },
-        data: JSON.stringify({ profile: data })
-      }, function() {
-        // success - profile synced
-      }, function() {
-        console.warn('Could not sync profile settings with backend.');
-      });
-    }
-
-    // Hide onboarding modal/wizard
     jQuery('#onboarding-overlay').fadeOut();
-    // Refresh main app dashboard metrics
     jQuery(document).trigger('ecotrack:onboarding-complete');
+  }
+
+  /**
+   * Binds click handlers to wizard control buttons.
+   * @private
+   */
+  function _bindWizardButtons() {
+    jQuery('#btn-next')
+      .off('click')
+      .on('click', function () {
+        if (validateStep(currentStep)) {
+          currentStep++;
+          updateWizardUI();
+        }
+      });
+
+    jQuery('#btn-prev')
+      .off('click')
+      .on('click', function () {
+        if (currentStep > 1) {
+          currentStep--;
+          updateWizardUI();
+        }
+      });
+
+    jQuery('#btn-skip')
+      .off('click')
+      .on('click', function () {
+        Preferences.setOnboarded(true);
+        jQuery('#onboarding-overlay').fadeOut();
+        jQuery(document).trigger('ecotrack:onboarding-complete');
+      });
+
+    jQuery('#btn-finish').off('click').on('click', saveOnboardingData);
   }
 
   /**
@@ -175,9 +238,8 @@
    * @returns {void}
    */
   function initOnboarding() {
-    // Check if onboarding completed
-    const onboarded = localStorage.getItem('ecotrack_onboarded');
-    if (onboarded === 'true') {
+    const onboarded = Preferences.isOnboarded();
+    if (onboarded) {
       jQuery('#onboarding-overlay').hide();
     } else {
       jQuery('#onboarding-overlay').show();
@@ -185,39 +247,14 @@
       updateWizardUI();
     }
 
-    // Hook wizard buttons
-    jQuery('#btn-next').off('click').on('click', function() {
-      if (validateStep(currentStep)) {
-        currentStep++;
-        updateWizardUI();
-      }
-    });
+    _bindWizardButtons();
 
-    jQuery('#btn-prev').off('click').on('click', function() {
-      if (currentStep > 1) {
-        currentStep--;
-        updateWizardUI();
-      }
-    });
+    jQuery('#onboarding-lang-select')
+      .off('change')
+      .on('change', function () {
+        jQuery('#lang-select').val(jQuery(this).val()).trigger('change');
+      });
 
-    jQuery('#btn-skip').off('click').on('click', function() {
-      // Set baseline default settings
-      localStorage.setItem('ecotrack_onboarded', 'true');
-      jQuery('#onboarding-overlay').fadeOut();
-      jQuery(document).trigger('ecotrack:onboarding-complete');
-    });
-
-    jQuery('#btn-finish').off('click').on('click', function() {
-      saveOnboardingData();
-    });
-
-    // Language selector change inside onboarding triggers loading languages
-    jQuery('#onboarding-lang-select').off('change').on('change', function() {
-      const selected = jQuery(this).val();
-      jQuery('#lang-select').val(selected).trigger('change');
-    });
-
-    // Ensure steps indicator click is disabled (must use buttons)
     jQuery('.step-indicator').css('cursor', 'default');
   }
 
@@ -226,17 +263,22 @@
     jQuery(document).ready(initOnboarding);
   }
 
-  const OnboardingController = {
+  return {
     initOnboarding,
     validateStep,
     saveOnboardingData,
     getCurrentStep: () => currentStep,
-    setStep: (s) => { currentStep = s; updateWizardUI(); }
+    setStep: (s) => {
+      currentStep = s;
+      updateWizardUI();
+    },
   };
+})();
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = OnboardingController;
-  } else {
-    global.EcoTrackOnboarding = OnboardingController;
-  }
-})(typeof window !== 'undefined' ? window : this);
+// Browser exposes the module on window; Node/Jest exposes it via module.exports.
+// This block is identical across every module file — do not vary its shape.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = EcoTrackOnboarding;
+} else {
+  window.EcoTrackOnboarding = EcoTrackOnboarding;
+}

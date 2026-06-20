@@ -4,24 +4,19 @@
  */
 
 // India-specific emission factors (gCO2 per unit)
-const EMISSION_FACTORS = {
-  // Commute (per km)
-  rideshare: 180,
-  metro: 35,
-  auto_rickshaw: 100,
-  domestic_rail: 15,
-  cycle: 0,
-  walk: 0,
-  
-  // Logistics (per kg)
-  air_freight: 600,
-  rail_freight: 25,
-  road_freight: 120,
-  
-  // Digital (per GB)
-  email: 7000,
-  cloud: 7000
-};
+const EMISSION_FACTORS = Object.freeze({
+  RIDESHARE: 180,
+  METRO: 35,
+  AUTO_RICKSHAW: 100,
+  DOMESTIC_RAIL: 15,
+  CYCLE: 0,
+  WALK: 0,
+  AIR_FREIGHT: 600,
+  RAIL_FREIGHT: 25,
+  ROAD_FREIGHT: 120,
+  EMAIL: 7000,
+  CLOUD: 7000,
+});
 
 /**
  * Calculates emissions based on payload details.
@@ -30,22 +25,50 @@ const EMISSION_FACTORS = {
  * @returns {number} The calculated emissions in grams of CO2.
  */
 function calculateEmissions(payload) {
-  const type = payload.type;          // 'commute' | 'purchase' | 'email' | 'cloud'
-  const subType = payload.subType;    // e.g. 'rideshare', 'air_freight', etc.
-  const rawValue = Number(payload.rawValue || 0);
+  const { type, subType, rawValue = 0 } = payload;
+  const key = (type === 'email' || type === 'cloud' ? type : subType).toUpperCase();
+  const factor = EMISSION_FACTORS[key] !== undefined ? EMISSION_FACTORS[key] : 0;
+  return Number(rawValue) * factor;
+}
 
-  let factor = 0;
+/**
+ * Helper to detect consecutive rideshares.
+ * @param {Array<Object>} commutes List of commute entries.
+ * @returns {boolean} True if detected.
+ * @private
+ */
+function _checkConsecutiveRideshares(commutes) {
+  let consecutiveCount = 0;
+  let maxConsecutive = 0;
+  commutes.forEach(function (c) {
+    const isRideshare =
+      c.subType === 'rideshare' ||
+      (c.rawValue > 0 && Math.abs(c.emissionsGrams / c.rawValue - 180) < 0.1);
+    if (isRideshare) {
+      consecutiveCount++;
+      maxConsecutive = Math.max(maxConsecutive, consecutiveCount);
+    } else {
+      consecutiveCount = 0;
+    }
+  });
+  return maxConsecutive >= 3;
+}
 
-  if (type === 'commute') {
-    factor = EMISSION_FACTORS[subType] !== undefined ? EMISSION_FACTORS[subType] : 0;
-  } else if (type === 'purchase') {
-    // subType can be air_freight, rail_freight, road_freight
-    factor = EMISSION_FACTORS[subType] !== undefined ? EMISSION_FACTORS[subType] : 0;
-  } else if (type === 'email' || type === 'cloud') {
-    factor = EMISSION_FACTORS[type] || 0;
-  }
-
-  return rawValue * factor;
+/**
+ * Helper to check high cloud usage.
+ * @param {Array<Object>} entries List of behavioral entries.
+ * @returns {boolean} True if detected.
+ * @private
+ */
+function _checkHighCloudUsage(entries) {
+  const totalCloudGB = entries
+    .filter(function (e) {
+      return e.type === 'cloud';
+    })
+    .reduce(function (sum, e) {
+      return sum + Number(e.rawValue || 0);
+    }, 0);
+  return totalCloudGB > 2.0;
 }
 
 /**
@@ -56,38 +79,22 @@ function calculateEmissions(payload) {
  */
 function detectPatterns(entries) {
   const patterns = [];
-  if (!Array.isArray(entries)) return patterns;
-
-  // Commutes sorted by timestamp ascending
-  const commutes = entries
-    .filter(function(e) { return e.type === 'commute'; })
-    .sort(function(a, b) { return a.timestamp - b.timestamp; });
-
-  // Check 3+ consecutive rideshares
-  let consecutiveRideshareCount = 0;
-  let maxConsecutiveRideshare = 0;
-  commutes.forEach(function(c) {
-    const isRideshare = c.subType === 'rideshare' || (c.rawValue > 0 && Math.abs((c.emissionsGrams / c.rawValue) - 180) < 0.1);
-    if (isRideshare) {
-      consecutiveRideshareCount++;
-      if (consecutiveRideshareCount > maxConsecutiveRideshare) {
-        maxConsecutiveRideshare = consecutiveRideshareCount;
-      }
-    } else {
-      consecutiveRideshareCount = 0;
-    }
-  });
-
-  if (maxConsecutiveRideshare >= 3) {
-    patterns.push('consecutive_rideshare');
+  if (!Array.isArray(entries)) {
+    return patterns;
   }
 
-  // Check high cloud usage (total cloud rawValue > 2.0)
-  const totalCloudGB = entries
-    .filter(function(e) { return e.type === 'cloud'; })
-    .reduce(function(sum, e) { return sum + Number(e.rawValue || 0); }, 0);
+  const commutes = entries
+    .filter(function (e) {
+      return e.type === 'commute';
+    })
+    .sort(function (a, b) {
+      return a.timestamp - b.timestamp;
+    });
 
-  if (totalCloudGB > 2.0) {
+  if (_checkConsecutiveRideshares(commutes)) {
+    patterns.push('consecutive_rideshare');
+  }
+  if (_checkHighCloudUsage(entries)) {
     patterns.push('high_cloud_usage');
   }
 
@@ -100,22 +107,22 @@ function detectPatterns(entries) {
  * @param {MessageEvent} e The postMessage event containing action and payload.
  * @returns {void}
  */
-self.onmessage = function(e) {
+self.onmessage = function (e) {
   const { action, payload } = e.data;
-  
+
   if (action === 'calculate') {
     const emissionsGrams = calculateEmissions(payload);
     self.postMessage({
       action: 'result',
       emissionsGrams: emissionsGrams,
-      payload: payload
+      payload: payload,
     });
   } else if (action === 'detectPatterns') {
     const patterns = detectPatterns(payload.entries);
     self.postMessage({
       action: 'patternResult',
       patterns: patterns,
-      payload: payload
+      payload: payload,
     });
   }
 };

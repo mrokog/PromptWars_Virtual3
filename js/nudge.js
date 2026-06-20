@@ -1,5 +1,13 @@
-(function(global) {
+/**
+ * Eco-Nudge System for EcoTrack India.
+ */
+const EcoTrackNudge = (function () {
   'use strict';
+
+  const Constants =
+    typeof require !== 'undefined' ? require('./constants.js') : global.EcoTrackConstants || {};
+  const Preferences =
+    typeof require !== 'undefined' ? require('./preferences.js') : global.EcoTrackPreferences || {};
 
   const nudgeQueue = [];
   let isDisplaying = false;
@@ -18,28 +26,13 @@
   }
 
   /**
-   * Processes the queue to display the next nudge if none is active.
-   *
-   * @returns {void}
+   * Helper to create the nudge card jQuery element.
+   * @param {Object} current Current queue item.
+   * @returns {jQuery} Element representation.
+   * @private
    */
-  function processQueue() {
-    if (isDisplaying || nudgeQueue.length === 0) return;
-
-    isDisplaying = true;
-    const current = nudgeQueue.shift();
-
-    // Create nudge element
-    const $container = jQuery('#nudge-container');
-    if ($container.length === 0) {
-      isDisplaying = false;
-      return;
-    }
-
-    // Clean container
-    $container.empty();
-
-    // Create the nudge card HTML with action button and close trigger
-    const $nudgeCard = jQuery(
+  function _createNudgeElement(current) {
+    return jQuery(
       `<div class="eco-nudge" role="alert" aria-live="polite">
         <span class="nudge-icon" aria-hidden="true">🌱</span>
         <div class="nudge-content" style="display: flex; flex-direction: column; flex: 1;">
@@ -49,13 +42,18 @@
         <button class="nudge-dismiss" aria-label="Dismiss this suggestion" style="background: none; border: none; color: #FFFFFF; font-size: 1.2rem; cursor: pointer; padding: 0 8px; display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px;">✕</button>
       </div>`
     );
+  }
 
-    $container.append($nudgeCard);
-    
-    // Apply translations to the card
+  /**
+   * Helper to load translation and update the card text.
+   * @param {jQuery} $nudgeCard The card element.
+   * @param {Object} current The queue item.
+   * @private
+   */
+  function _translateNudgeCard($nudgeCard, current) {
     if (global.EcoTrackI18n && global.EcoTrackI18n.applyStrings) {
-      const activeLang = localStorage.getItem('ecotrack_lang') || 'en';
-      jQuery.getJSON(`/lang/${activeLang}.json`).done(function(strings) {
+      const activeLang = Preferences.getLanguage();
+      jQuery.getJSON(`/lang/${activeLang}.json`).done(function (strings) {
         if (strings && strings.nudge) {
           const keySuffix = current.key.split('.')[1];
           if (!strings.nudge[keySuffix]) {
@@ -69,22 +67,26 @@
         }
       });
     }
+  }
 
-    // Show card
-    $nudgeCard.css({ display: 'flex', opacity: 0 }).animate({ opacity: 1 }, 300);
-
-    // Setup action button click handler
-    $nudgeCard.find('.nudge-action-btn').on('click', function() {
+  /**
+   * Binds click handlers for action and close triggers.
+   * @param {jQuery} $nudgeCard The card element.
+   * @param {Object} current The queue item.
+   * @private
+   */
+  function _bindNudgeActions($nudgeCard, current) {
+    $nudgeCard.find('.nudge-action-btn').on('click', function () {
       if (current.key.indexOf('commute_rail') !== -1) {
         const distance = 15;
         if (global.EcoTrackWorker && global.EcoTrackDB) {
-          global.EcoTrackWorker.calculate('commute', 'metro', distance).then(function(emissions) {
+          global.EcoTrackWorker.calculate('commute', 'metro', distance).then(function (emissions) {
             global.EcoTrackDB.write({
               type: 'commute',
               subType: 'metro',
               rawValue: distance,
-              emissionsGrams: emissions
-            }).then(function() {
+              emissionsGrams: emissions,
+            }).then(function () {
               jQuery(document).trigger('ecotrack:entryAdded');
               dismissNudge($nudgeCard);
             });
@@ -92,13 +94,14 @@
         }
       } else if (current.key.indexOf('digital_clear') !== -1) {
         if (global.EcoTrackDB) {
-          const factor = (global.EcoTrackConstants && global.EcoTrackConstants.EMISSION_FACTORS && global.EcoTrackConstants.EMISSION_FACTORS.cloud_per_gb) || 7000;
+          const factor =
+            (Constants.EMISSION_FACTORS && Constants.EMISSION_FACTORS.CLOUD_PER_GB) || 7000;
           global.EcoTrackDB.write({
             type: 'cloud',
             subType: 'cleanup',
             rawValue: -2.0,
-            emissionsGrams: -2.0 * factor
-          }).then(function() {
+            emissionsGrams: -2.0 * factor,
+          }).then(function () {
             jQuery(document).trigger('ecotrack:entryAdded');
             dismissNudge($nudgeCard);
           });
@@ -108,16 +111,40 @@
       }
     });
 
-    // Setup manual dismiss
-    $nudgeCard.find('.nudge-dismiss').on('click', function() {
+    $nudgeCard.find('.nudge-dismiss').on('click', function () {
       dismissNudge($nudgeCard);
     });
+  }
 
-    // Setup auto-dismiss after constants value (default 8000ms)
-    const dismissMs = (global.EcoTrackConstants && global.EcoTrackConstants.NUDGE_DISMISS_MS) || 8000;
-    autoDismissTimeout = setTimeout(function() {
-      dismissNudge($nudgeCard);
-    }, dismissMs);
+  /**
+   * Processes the queue to display the next nudge if none is active.
+   * @returns {void}
+   */
+  function processQueue() {
+    if (isDisplaying || nudgeQueue.length === 0) {
+      return;
+    }
+
+    isDisplaying = true;
+    const current = nudgeQueue.shift();
+
+    const $container = jQuery('#nudge-container');
+    if ($container.length === 0) {
+      isDisplaying = false;
+      return;
+    }
+
+    $container.empty();
+    const $nudgeCard = _createNudgeElement(current);
+    $container.append($nudgeCard);
+
+    _translateNudgeCard($nudgeCard, current);
+    _bindNudgeActions($nudgeCard, current);
+
+    $nudgeCard.css({ display: 'flex', opacity: 0 }).animate({ opacity: 1 }, 300);
+
+    const dismissMs = (Constants.TIMING && Constants.TIMING.NUDGE_AUTO_DISMISS_MS) || 8000;
+    autoDismissTimeout = setTimeout(() => dismissNudge($nudgeCard), dismissMs);
   }
 
   /**
@@ -132,66 +159,71 @@
       autoDismissTimeout = null;
     }
 
-    $card.animate({ opacity: 0 }, 300, function() {
+    $card.animate({ opacity: 0 }, 300, function () {
       $card.remove();
       isDisplaying = false;
-      // Process next in queue
       processQueue();
     });
   }
 
   /**
+   * Evaluates detected patterns to trigger specific nudges.
+   * @param {Array<string>} patterns Detected pattern codes.
+   * @param {Array<Object>} entries List of behavioral entries.
+   * @private
+   */
+  function _processDetectedPatterns(patterns, entries) {
+    if (patterns.indexOf('consecutive_rideshare') !== -1) {
+      const settings = Preferences.getUserSettings() || {};
+      const baselineMode = settings.commuteMode || 'rideshare';
+      triggerNudge(`nudge.commute_rail_from_${baselineMode}`, 'Switch to metro → save 40% today');
+    }
+
+    if (patterns.indexOf('high_cloud_usage') !== -1) {
+      const cloudEntries = entries.filter((e) => e.type === 'cloud' && e.rawValue > 2);
+      const totalGB = cloudEntries.reduce((sum, e) => sum + Number(e.rawValue || 0), 0);
+      const factor =
+        (Constants.EMISSION_FACTORS && Constants.EMISSION_FACTORS.CLOUD_PER_GB) || 7000;
+      triggerNudge(
+        'nudge.digital_clear',
+        `Clear ${totalGB.toFixed(1)}GB of files → save ${(totalGB * factor).toLocaleString()}g CO₂`
+      );
+    }
+  }
+
+  /**
    * Scans IndexedDB records to identify patterns and trigger nudges automatically.
-   *
    * @returns {void}
    */
   function checkBehavioralNudges() {
-    if (!global.EcoTrackDB || !global.EcoTrackWorker) return;
+    if (!global.EcoTrackDB || !global.EcoTrackWorker) {
+      return;
+    }
 
-    global.EcoTrackDB.getAllEntries().then(function(entries) {
-      return global.EcoTrackWorker.detectPatterns(entries).then(function(patterns) {
-        if (patterns.indexOf('consecutive_rideshare') !== -1) {
-          let baselineMode = 'rideshare';
-          if (global.localStorage) {
-            const userSettingsStr = global.localStorage.getItem('ecotrack_user_settings');
-            if (userSettingsStr) {
-              try {
-                const settings = JSON.parse(userSettingsStr);
-                if (settings && settings.commuteMode) {
-                  baselineMode = settings.commuteMode;
-                }
-              } catch (e) {
-                // ignore
-              }
-            }
-          }
-          const key = `nudge.commute_rail_from_${baselineMode}`;
-          triggerNudge(key, 'Switch to metro → save 40% today');
-        }
-
-        if (patterns.indexOf('high_cloud_usage') !== -1) {
-          const cloudEntries = entries.filter(e => e.type === 'cloud' && e.rawValue > 2);
-          const totalGB = cloudEntries.reduce((sum, e) => sum + Number(e.rawValue || 0), 0);
-          const factor = (global.EcoTrackConstants && global.EcoTrackConstants.EMISSION_FACTORS && global.EcoTrackConstants.EMISSION_FACTORS.cloud_per_gb) || 7000;
-          triggerNudge('nudge.digital_clear', `Clear ${totalGB.toFixed(1)}GB of files → save ${(totalGB * factor).toLocaleString()}g CO₂`);
-        }
+    global.EcoTrackDB.getAllEntries()
+      .then(function (entries) {
+        return global.EcoTrackWorker.detectPatterns(entries).then(function (patterns) {
+          _processDetectedPatterns(patterns, entries);
+        });
+      })
+      .catch(function (err) {
+        console.error('[Nudge Engine] Failed to query behavioral data or detect patterns:', err);
       });
-    }).catch(function(err) {
-      console.error('[Nudge Engine] Failed to query behavioral data or detect patterns:', err);
-    });
   }
 
-  const NudgeEngine = {
+  return {
     triggerNudge,
     dismissNudge,
     checkBehavioralNudges,
     getQueue: () => nudgeQueue,
-    isDisplaying: () => isDisplaying
+    isDisplaying: () => isDisplaying,
   };
+})();
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = NudgeEngine;
-  } else {
-    global.EcoTrackNudge = NudgeEngine;
-  }
-})(typeof window !== 'undefined' ? window : this);
+// Browser exposes the module on window; Node/Jest exposes it via module.exports.
+// This block is identical across every module file — do not vary its shape.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = EcoTrackNudge;
+} else {
+  window.EcoTrackNudge = EcoTrackNudge;
+}

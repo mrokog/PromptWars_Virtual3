@@ -1,37 +1,50 @@
-(function(global) {
+/**
+ * Global constant definitions for EcoTrack India.
+ */
+const EcoTrackConstants = (function () {
   'use strict';
 
   const EMISSION_FACTORS = Object.freeze({
-    rideshare_per_km: 180,       // gCO2/km
-    metro_per_km: 35,            // gCO2/km
-    auto_rickshaw_per_km: 100,    // gCO2/km
-    domestic_rail_per_km: 15,     // gCO2/km
-    air_freight_per_kg: 600,      // gCO2/kg
-    domestic_rail_freight: 25,    // gCO2/kg (domestic rail freight)
-    domestic_road_freight: 120,   // gCO2/kg
-    email_per_gb: 7000,           // gCO2/GB (idle server data)
-    cloud_per_gb: 7000            // gCO2/GB
+    RIDESHARE_PER_KM: 180,
+    METRO_PER_KM: 35,
+    AUTO_RICKSHAW_PER_KM: 100,
+    DOMESTIC_RAIL_PER_KM: 15,
+    AIR_FREIGHT_PER_KG: 600,
+    DOMESTIC_RAIL_FREIGHT_PER_KG: 25,
+    DOMESTIC_ROAD_FREIGHT_PER_KG: 120,
+    EMAIL_PER_GB: 7000,
+    CLOUD_PER_GB: 7000,
   });
 
-  const THEMES = Object.freeze(['western-ghats', 'terracotta-monsoon']);
+  const THEMES = Object.freeze({
+    WESTERN_GHATS: 'western-ghats',
+    TERRACOTTA_MONSOON: 'terracotta-monsoon',
+  });
 
   const THEME_ICONS = Object.freeze({
     'western-ghats': '🏔️',
-    'terracotta-monsoon': '🌧️'
+    'terracotta-monsoon': '🌧️',
   });
 
   const THEME_LABELS = Object.freeze({
     'western-ghats': 'Western Ghats',
-    'terracotta-monsoon': 'Terracotta & Monsoon'
+    'terracotta-monsoon': 'Terracotta & Monsoon',
   });
 
   const SUPPORTED_LANGUAGES = Object.freeze(['en', 'hi', 'bn', 'mr', 'ta']);
 
   const DEFAULT_LANGUAGE = 'en';
 
-  const CARBON_ZONES = Object.freeze({ RED: 60, AMBER: 30 });
+  const CARBON_METER_ZONES = Object.freeze({
+    RED_THRESHOLD: 60,
+    AMBER_THRESHOLD: 30,
+  });
 
-  const NUDGE_DISMISS_MS = 8000;
+  const TIMING = Object.freeze({
+    NUDGE_AUTO_DISMISS_MS: 8000,
+    DEBOUNCE_MS: 300,
+    THEME_TRANSITION_MS: 300,
+  });
 
   const RETURN_LOGISTICS_SURCHARGE = 380;
 
@@ -43,26 +56,28 @@
     auto_rickshaw: 10,
     domestic_rail: 50,
     cycle: 0,
-    walk: 0
+    walk: 0,
   });
 
-  const Constants = Object.freeze({
+  return {
     EMISSION_FACTORS,
     THEMES,
     THEME_ICONS,
     THEME_LABELS,
     SUPPORTED_LANGUAGES,
     DEFAULT_LANGUAGE,
-    CARBON_ZONES,
-    NUDGE_DISMISS_MS,
+    CARBON_METER_ZONES,
+    TIMING,
     RETURN_LOGISTICS_SURCHARGE,
     CLOUD_THRESHOLD_GB,
-    BASELINE_SEEDS
-  });
+    BASELINE_SEEDS,
+  };
+})();
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = Constants;
-  } else {
-    global.EcoTrackConstants = Constants;
-  }
-})(typeof window !== 'undefined' ? window : this);
+// Browser exposes the module on window; Node/Jest exposes it via module.exports.
+// This block is identical across every module file — do not vary its shape.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = EcoTrackConstants;
+} else {
+  window.EcoTrackConstants = EcoTrackConstants;
+}

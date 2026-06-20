@@ -1,7 +1,11 @@
-(function(global) {
+/**
+ * Shared utility functions for EcoTrack India.
+ */
+const EcoTrackUtils = (function () {
   'use strict';
 
-  const Constants = typeof require !== 'undefined' ? require('./constants.js') : (global.EcoTrackConstants || {});
+  const Constants =
+    typeof require !== 'undefined' ? require('./constants.js') : global.EcoTrackConstants || {};
 
   /**
    * Wraps a jQuery AJAX call with standardized error logging and fallback.
@@ -15,13 +19,15 @@
     const $ = global.jQuery || (typeof require !== 'undefined' ? require('jquery') : null);
     if (!$) {
       console.error('[EcoTrack Utils] jQuery is not available.');
-      if (onError) onError(new Error('jQuery not available'));
+      if (onError) {
+        onError(new Error('jQuery not available'));
+      }
       return;
     }
 
     return $.ajax(options)
       .done(onSuccess)
-      .fail(function(jqxhr, status, error) {
+      .fail(function (jqxhr, status, error) {
         console.error(`[EcoTrack] Request failed: ${options.url || 'unknown'}`, status, error);
         if (onError) {
           onError(error || new Error(status));
@@ -41,13 +47,15 @@
     const $ = global.jQuery || (typeof require !== 'undefined' ? require('jquery') : null);
     if (!$) {
       console.error('[EcoTrack Utils] jQuery is not available.');
-      if (onError) onError(new Error('jQuery not available'));
+      if (onError) {
+        onError(new Error('jQuery not available'));
+      }
       return;
     }
 
     return $.getJSON(url)
       .done(onSuccess)
-      .fail(function(jqxhr, status, error) {
+      .fail(function (jqxhr, status, error) {
         console.error(`[EcoTrack] Request failed: ${url}`, status, error);
         if (onError) {
           onError(error || new Error(status));
@@ -62,8 +70,8 @@
    * @returns {string} Relatable comparison string, e.g. "≈ 6.9 km of car travel".
    */
   function toRelatableComparison(grams) {
-    const factors = Constants.EMISSION_FACTORS || { rideshare_per_km: 180 };
-    const kmDrivingPerGram = 1 / (factors.rideshare_per_km || 180);
+    const factors = Constants.EMISSION_FACTORS || { RIDESHARE_PER_KM: 180 };
+    const kmDrivingPerGram = 1 / (factors.RIDESHARE_PER_KM || 180);
     const km = (grams * kmDrivingPerGram).toFixed(1);
     return `≈ ${km} km of car travel`;
   }
@@ -75,7 +83,7 @@
    * @returns {string} Formatted string, e.g. "1,240g CO2 (≈ 6.9 km of car travel)".
    */
   function formatEmissions(grams) {
-    const formattedVal = Math.round(grams).toLocaleString();
+    const formattedVal = formatNumber(grams);
     const comparison = toRelatableComparison(grams);
     return `${formattedVal}g CO₂ (${comparison})`;
   }
@@ -92,17 +100,30 @@
     return Math.max(min, Math.min(max, value));
   }
 
-  const Utils = {
+  /**
+   * Formats a number to its locale string after rounding.
+   *
+   * @param {number} val - Input number.
+   * @returns {string} Formatted number string.
+   */
+  function formatNumber(val) {
+    return Math.round(val).toLocaleString();
+  }
+
+  return {
     safeAjax,
     safeGetJSON,
     toRelatableComparison,
     formatEmissions,
-    clamp
+    clamp,
+    formatNumber,
   };
+})();
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = Utils;
-  } else {
-    global.EcoTrackUtils = Utils;
-  }
-})(typeof window !== 'undefined' ? window : this);
+// Browser exposes the module on window; Node/Jest exposes it via module.exports.
+// This block is identical across every module file — do not vary its shape.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = EcoTrackUtils;
+} else {
+  window.EcoTrackUtils = EcoTrackUtils;
+}
